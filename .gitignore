@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+out/
+
+# TypeScript build artifacts
+*.tsbuildinfo
+tsconfig.tsbuildinfo
+tsconfig.node.tsbuildinfo
+vite.config.tsbuildinfo
+
+# Generated JS artifacts outside dist
+*.js
+*.js.map
+
+# Editor / environment
+.DS_Store
+.idea/
+.vscode/
+*.local
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# OS / logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
