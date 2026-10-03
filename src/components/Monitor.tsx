@@ -1,59 +1,75 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useArbitrageStore } from "../store";
-import { mockDeposits, exchangeMetrics } from "../data";
+import type { Exchange, Network } from "../store";
+import { mockDeposits } from "../data";
+import { getExchangeConfig, getNetworkConfig } from "../config";
+import SamplePill from "./SamplePill";
 
-const useStore = useArbitrageStore;
-
-const formatCurrency = (value: number) =>
+const formatUsd = (value: number) =>
   new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
     maximumFractionDigits: 2
   }).format(value);
 
+const fmtPrice = (n: number) =>
+  n.toLocaleString("en-US", { maximumFractionDigits: n >= 100 ? 2 : n >= 1 ? 4 : 6 });
+
+const fmtTime = (ts: number) => (ts ? new Date(ts).toLocaleTimeString() : "—");
+
+const exchangeLabel = (id: string) => getExchangeConfig(id as Exchange)?.label ?? id;
+const networkLabel = (id: string) => getNetworkConfig(id as Network)?.label ?? id;
+
 export default function Monitor() {
   const exchange = useArbitrageStore((s) => s.exchange);
   const network = useArbitrageStore((s) => s.network);
   const refreshRateMs = useArbitrageStore((s) => s.refreshRateMs);
   const setRefreshRateMs = useArbitrageStore((s) => s.setRefreshRateMs);
-  const setExchange = useStore((s) => s.setExchange);
-  const setNetwork = useStore((s) => s.setNetwork);
+  const setExchange = useArbitrageStore((s) => s.setExchange);
+  const feedStatus = useArbitrageStore((s) => s.feedStatus);
+  const feedSource = useArbitrageStore((s) => s.feedSource);
+  const connectedExchanges = useArbitrageStore((s) => s.connectedExchanges);
+  const routes = useArbitrageStore((s) => s.routes);
+  const quotes = useArbitrageStore((s) => s.quotes);
+  const feedUpdatedAt = useArbitrageStore((s) => s.feedUpdatedAt);
+  const bumpFeedEpoch = useArbitrageStore((s) => s.bumpFeedEpoch);
 
-  const [havels, setHavels] = useState<{ exchange: string; value: number; change: number }[]>([
-    { exchange: "Binance", value: 1842.2, change: 0.00 },
-    { exchange: "Bybit", value: 1839.75, change: 0.00 },
-    { exchange: "OKX", value: 1841.05, change: 0.00 }
-  ]);
-  const [swapRate, setSwapRate] = useState(0.18);
-  const [spreadWidth, setSpreadWidth] = useState(30);
-  const [wallet, setWallet] = useState("0x7F5...2C41");
+  const [minSpread, setMinSpread] = useState(0);
   const [token, setToken] = useState("SOL");
-  const [amount, setAmount] = useState("1000");
-  const [depositAmount, setDepositAmount] = useState("24.85");
-  const [depositAction, setDepositAction] = useState<"modified" | "enabled" | "pending">("enabled");
+  const [depositAmount] = useState("24.85");
   const [depositBtn, setDepositBtn] = useState("Modify");
 
-  useEffect(() => {
-    const id = setInterval(() => {
-      setHavels((prev) =>
-        prev.map((h) => ({
-          ...h,
-          value: h.value + (Math.random() - 0.5) * 4,
-          change: Math.max(-2.5, Math.min(2.5, (Math.random() - 0.5) * 0.6))
-        }))
-      );
-      setSwapRate((r) => Math.min(1, Math.max(0, r + (Math.random() - 0.5) * 0.04)));
-      setSpreadWidth((w) => Math.min(92, Math.max(8, w + (Math.random() - 0.5) * 8)));
-    }, refreshRateMs);
-    return () => clearInterval(id);
-  }, [refreshRateMs]);
-
   const filteredDeposits = useMemo(() => {
-    return mockDeposits.filter((d) => {
-      const tokenOk = d.symbol.toLowerCase().includes(token.toLowerCase());
-      return tokenOk;
-    });
+    return mockDeposits.filter((d) => d.symbol.toLowerCase().includes(token.toLowerCase()));
   }, [token]);
+
+  const visibleRoutes = useMemo(
+    () => routes.filter((r) => r.spread >= minSpread).slice(0, 8),
+    [routes, minSpread]
+  );
+
+  const spreads = visibleRoutes.map((r) => r.spread);
+  const maxSpread = spreads.length ? Math.max(...spreads) : 0;
+  const minSpreadSeen = spreads.length ? Math.min(...spreads) : 0;
+  const spreadRange = maxSpread - minSpreadSeen || 1;
+
+  // Only ever show the selected exchange's own quote — never another one's.
+  const selectedQuote = quotes.find((q) => q.exchange === exchange);
+
+  const cycleExchange = () => {
+    const order = (
+      connectedExchanges.length ? connectedExchanges : ["binance", "bybit"]
+    ) as Exchange[];
+    const idx = order.indexOf(exchange);
+    setExchange(order[(idx + 1) % order.length]);
+  };
+
+  const feedStatusDot =
+    feedStatus === "live"
+      ? "bg-emerald-400"
+      : feedStatus === "offline"
+        ? "bg-rose-400"
+        : "bg-amber-400 animate-pulse";
 
   return (
     <div className="space-y-6">
@@ -79,30 +95,17 @@ export default function Monitor() {
           </div>
 
           <div className="flex items-center gap-2 text-sm text-white/60">
-            <span>Swap </span>
+            <span>Min spread </span>
             <input
               type="range"
               min={0}
               max={1}
               step={0.01}
-              value={swapRate}
-              onChange={(e) => setSwapRate(Number(e.target.value))}
+              value={minSpread}
+              onChange={(e) => setMinSpread(Number(e.target.value))}
               className="h-1.5 w-24 cursor-pointer appearance-none rounded-full bg-white/20 outline-none"
             />
-            <span className="w-12 text-right tabular-nums text-xs text-white/70">{((swapRate * 100).toFixed(0)) + "%"}</span>
-          </div>
-
-          <div className="flex items-center gap-2 text-sm text-white/60">
-            <span>Spread </span>
-            <input
-              type="range"
-              min={0}
-              max={92}
-              value={spreadWidth}
-              onChange={(e) => setSpreadWidth(Number(e.target.value))}
-              className="h-1.5 w-24 cursor-pointer appearance-none rounded-full bg-white/20 outline-none"
-            />
-            <span className="w-10 text-right tabular-nums text-xs text-white/70">{spreadWidth}%</span>
+            <span className="w-10 text-right tabular-nums text-xs text-white/70">{minSpread.toFixed(2)}%</span>
           </div>
         </div>
       </section>
@@ -111,7 +114,10 @@ export default function Monitor() {
         <div className="card">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-semibold text-white/70">Network</h3>
-            <span className="text-xs text-white/40">{network}</span>
+            <div className="flex items-center gap-2">
+              <SamplePill />
+              <span className="text-xs text-white/40">{networkLabel(network)}</span>
+            </div>
           </div>
           <div className="mt-3 flex items-center gap-2 text-sm">
             <span className="h-2 w-2 rounded-full bg-emerald-400" />
@@ -120,11 +126,11 @@ export default function Monitor() {
           <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
             <div>
               <p className="text-xs text-white/40">Deposit</p>
-              <p className="text-xl font-semibold tabular-nums">{depositAmount} {token}</p>
+              <p className="text-xl font-semibold tabular-nums">{depositAmount} SOL</p>
             </div>
             <div>
               <p className="text-xs text-white/40">Withdraw</p>
-              <p className="text-xl font-semibold tabular-nums">{depositAmount} {token}</p>
+              <p className="text-xl font-semibold tabular-nums">{depositAmount} SOL</p>
             </div>
           </div>
           <div className="mt-4">
@@ -138,21 +144,37 @@ export default function Monitor() {
         </div>
 
         <div className="card">
-          <h3 className="text-sm font-semibold text-white/70">Exchange</h3>
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-white/70">Exchange</h3>
+            <span className="text-xs text-white/40">{exchangeLabel(exchange)}</span>
+          </div>
           <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
             <div>
-              <p className="text-xs text-white/40">Spot</p>
-              <p className="text-xl font-semibold tabular-nums">{exchangeMetrics.find((m) => m.exchange === "Binance")?.spot}</p>
+              <p className="text-xs text-white/40">
+                Bid {selectedQuote ? `(${selectedQuote.symbol})` : ""}
+              </p>
+              <p className="text-xl font-semibold tabular-nums">
+                {selectedQuote ? fmtPrice(selectedQuote.bid) : "—"}
+              </p>
             </div>
             <div>
-              <p className="text-xs text-white/40">Futures</p>
-              <p className="text-xl font-semibold tabular-nums">{exchangeMetrics.find((m) => m.exchange === "Binance")?.futures}</p>
+              <p className="text-xs text-white/40">
+                Ask {selectedQuote ? `(${selectedQuote.symbol})` : ""}
+              </p>
+              <p className="text-xl font-semibold tabular-nums">
+                {selectedQuote ? fmtPrice(selectedQuote.ask) : "—"}
+              </p>
             </div>
           </div>
+          <p className="mt-2 text-[11px] text-white/40">
+            {selectedQuote
+              ? "Futures: awaiting backend feed"
+              : "Not connected — toggle to a live exchange"}
+          </p>
           <div className="mt-4">
             <button
               className="w-full rounded-xl bg-gradient-to-r from-brand-600 to-brand-500 py-2 text-sm font-semibold text-white transition hover:from-brand-500 hover:to-brand-400"
-              onClick={() => setExchange(exchange === "binance" ? "bybit" : "binance")}
+              onClick={cycleExchange}
             >
               Toggle exchange
             </button>
@@ -160,27 +182,32 @@ export default function Monitor() {
         </div>
 
         <div className="card">
-          <h3 className="text-sm font-semibold text-white/70">Live Mode</h3>
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-white/70">Feed</h3>
+            <span className="text-xs text-white/40">
+              {feedSource === "backend" ? "backend ws" : feedSource === "market" ? "market ws" : "—"}
+            </span>
+          </div>
           <div className="mt-3 flex items-center gap-2 text-sm text-white/80">
-            <span className="h-2 w-2 rounded-full bg-emerald-400" />
-            Real-time updates active
+            <span className={`h-2 w-2 rounded-full ${feedStatusDot}`} />
+            {feedStatus === "live"
+              ? `Live · ${connectedExchanges.length} exchange${connectedExchanges.length === 1 ? "" : "s"}`
+              : feedStatus === "offline"
+                ? "Offline — retrying"
+                : "Connecting…"}
           </div>
-          <div className="mt-3 flex items-center gap-2 text-sm text-white/60">
-            <span className="h-2 w-2 rounded-full bg-amber-400" />
-            Auto reconnect
-          </div>
-          <div className="mt-4 flex gap-2">
+          <p className="mt-2 truncate text-xs text-white/50" title={connectedExchanges.join(", ")}>
+            {connectedExchanges.length ? connectedExchanges.map(exchangeLabel).join(" · ") : "no streams yet"}
+          </p>
+          <p className="mt-1 text-xs text-white/40">
+            Updated {fmtTime(feedUpdatedAt)} · every {refreshRateMs}ms
+          </p>
+          <div className="mt-4">
             <button
-              className="flex-1 rounded-xl bg-white/10 py-2 text-sm font-semibold text-white transition hover:bg-white/15"
-              onClick={() => setDepositAction(depositAction === "enabled" ? "modified" : "enabled")}
+              className="w-full rounded-xl bg-white/10 py-2 text-sm font-semibold text-white transition hover:bg-white/15"
+              onClick={() => bumpFeedEpoch()}
             >
-              {depositAction === "enabled" ? "Already enabled" : "Enable"}
-            </button>
-            <button
-              className="flex-1 rounded-xl bg-white/10 py-2 text-sm font-semibold text-white transition hover:bg-white/15"
-              onClick={() => setDepositAction(depositAction === "modified" ? "pending" : "modified")}
-            >
-              {depositAction === "modified" ? "Modify" : "Reconfirm"}
+              Reconnect
             </button>
           </div>
         </div>
@@ -188,7 +215,10 @@ export default function Monitor() {
 
       <section className="card">
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-white/70">Deposits</h3>
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-semibold text-white/70">Deposits</h3>
+            <SamplePill />
+          </div>
           <div className="flex gap-2">
             <input
               className="rounded-lg border-0 bg-white/5 px-3 py-1.5 text-sm font-medium text-white outline-none"
@@ -198,9 +228,9 @@ export default function Monitor() {
             />
             <button
               className="rounded-lg bg-white/10 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-white/15"
-              onClick={() => setDepositAction("pending")}
+              onClick={() => setToken("")}
             >
-              Add
+              Clear
             </button>
           </div>
         </div>
@@ -215,39 +245,85 @@ export default function Monitor() {
               <span className="text-sm font-semibold tabular-nums text-white">{dep.amount}</span>
             </div>
           ))}
+          {filteredDeposits.length === 0 && (
+            <p className="text-sm text-white/40">No sample deposits match “{token}”.</p>
+          )}
         </div>
       </section>
 
       <section className="card">
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-white/70">Arbitrage Routes</h3>
-          <span className="text-xs text-white/40">Auto-detected</span>
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-semibold text-white/70">Arbitrage Routes</h3>
+            <span
+              className={`h-2 w-2 rounded-full ${feedStatus === "live" ? "bg-emerald-400" : "bg-amber-400 animate-pulse"}`}
+            />
+          </div>
+          <span className="text-xs text-white/40">
+            {visibleRoutes.length} of {routes.length} live routes · {fmtTime(feedUpdatedAt)}
+          </span>
         </div>
 
         <div className="mt-4 space-y-3">
-          {havels.map((deal, i) => (
-            <div key={deal.exchange} className="flex items-center gap-4 rounded-xl bg-white/5 p-4">
-              <div className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
-              <div className="flex-1">
-                <div className="flex items-center justify-between">
-                  <p className="text-sm font-semibold text-white">{deal.exchange}</p>
-                  <p className={`text-xs font-semibold tabular-nums ${deal.change >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
-                    {deal.change >= 0 ? "+" : ""}{deal.change.toFixed(2)}%
+          {visibleRoutes.map((r) => {
+            const barWidth = 12 + 84 * ((r.spread - minSpreadSeen) / spreadRange);
+            return (
+              <div
+                key={`${r.exchangeFrom}-${r.exchangeTo}-${r.symbol}-${r.network}`}
+                className="flex items-center gap-4 rounded-xl bg-white/5 p-4"
+              >
+                <div
+                  className={`h-2.5 w-2.5 rounded-full ${r.spread >= 0 ? "bg-emerald-400" : "bg-rose-400"}`}
+                />
+                <div className="flex-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-semibold text-white">
+                      {exchangeLabel(r.exchangeFrom)} <span className="text-white/40">→</span>{" "}
+                      {exchangeLabel(r.exchangeTo)}
+                      <span className="ml-2 rounded-md bg-white/10 px-1.5 py-0.5 text-[11px] font-medium text-white/60">
+                        {r.symbol}
+                      </span>
+                    </p>
+                    <p
+                      className={`text-xs font-semibold tabular-nums ${
+                        r.spread >= 0 ? "text-emerald-400" : "text-rose-400"
+                      }`}
+                    >
+                      {r.spread >= 0 ? "+" : ""}
+                      {r.spread.toFixed(4)}%
+                    </p>
+                  </div>
+                  <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/10">
+                    <div
+                      className="h-full rounded-full bg-gradient-to-r from-brand-500 to-brand-400"
+                      style={{ width: `${Math.max(6, Math.min(100, barWidth))}%` }}
+                    />
+                  </div>
+                  <div className="mt-1.5 flex flex-wrap gap-4 text-xs tabular-nums text-white/40">
+                    <span>Buy {fmtPrice(r.buyPrice)}</span>
+                    <span>Sell {fmtPrice(r.sellPrice)}</span>
+                    <span>Vol {formatUsd(r.totalBuyUSD)}</span>
+                  </div>
+                </div>
+                <div className="text-right text-sm text-white">
+                  <p className="rounded-md bg-white/10 px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-white/60">
+                    {r.format}
                   </p>
-                </div>
-                <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/10">
-                  <div
-                    className="h-full rounded-full bg-gradient-to-r from-brand-500 to-brand-400"
-                    style={{ width: `${20 + (deal.value / 2000) * 75}%` }}
-                  />
+                  <p className="mt-1 text-xs text-white/40">{networkLabel(r.network)}</p>
                 </div>
               </div>
-              <div className="text-right text-sm tabular-nums text-white">
-                <p>Format: {i % 2 === 0 ? "hedge" : "transfer"}</p>
-                <p className="text-xs text-white/40">{deal.value.toFixed(2)} BTC</p>
-              </div>
+            );
+          })}
+
+          {visibleRoutes.length === 0 && (
+            <div className="rounded-xl bg-white/5 p-6 text-center text-sm text-white/50">
+              {routes.length === 0
+                ? feedStatus === "live"
+                  ? "Connected — waiting for quotes from at least two exchanges…"
+                  : "Waiting for the feed to connect…"
+                : `No routes at or above ${minSpread.toFixed(2)}% right now.`}
             </div>
-          ))}
+          )}
         </div>
       </section>
     </div>
