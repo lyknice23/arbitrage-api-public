@@ -1,15 +1,33 @@
 import { useArbitrageStore } from "../store";
-import { opportunityMap, exchangeMetrics } from "../data";
+import { opportunityMap } from "../data";
+import { exchangeConfig } from "../config";
+import SamplePill from "./SamplePill";
 
 export default function Explorer() {
   const exchange = useArbitrageStore((s) => s.exchange);
   const network = useArbitrageStore((s) => s.network);
+  const quotes = useArbitrageStore((s) => s.quotes);
+
+  // Live top-of-book per configured exchange (real feed data).
+  const metricRows = exchangeConfig.map((ex) => {
+    const quote =
+      quotes.find((q) => q.exchange === ex.id && q.symbol === "BTC/USDT") ??
+      quotes.find((q) => q.exchange === ex.id);
+    const spreadBps =
+      quote && quote.bid > 0 && quote.ask > 0
+        ? ((quote.ask - quote.bid) / quote.bid) * 10_000
+        : null;
+    return { id: ex.id, label: ex.label, quote, spreadBps };
+  });
 
   return (
     <div className="space-y-6">
       <section className="card">
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-white/70">Pair Explorer</h3>
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-semibold text-white/70">Pair Explorer</h3>
+            <SamplePill />
+          </div>
           <span className="text-xs text-white/40">{exchange} · {network}</span>
         </div>
 
@@ -49,27 +67,52 @@ export default function Explorer() {
       </section>
 
       <section className="card">
-        <h3 className="text-sm font-semibold text-white/70">Exchange Metrics</h3>
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-white/70">Exchange Metrics</h3>
+          <span className="text-xs text-white/40">live top-of-book</span>
+        </div>
         <div className="mt-4 overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-white/10 text-left text-xs text-white/40">
                 <th className="pb-2 font-medium">Exchange</th>
-                <th className="pb-2 font-medium">Spot</th>
-                <th className="pb-2 font-medium">Futures</th>
+                <th className="pb-2 font-medium">Symbol</th>
+                <th className="pb-2 font-medium">Bid</th>
+                <th className="pb-2 font-medium">Ask</th>
+                <th className="pb-2 font-medium">Spread (bps)</th>
               </tr>
             </thead>
             <tbody>
-              {exchangeMetrics.map((m) => (
-                <tr key={m.exchange} className="border-b border-white/5">
-                  <td className="py-2 font-medium text-white">{m.exchange}</td>
-                  <td className="py-2 text-white/80 tabular-nums">{m.spot}</td>
-                  <td className="py-2 text-white/80 tabular-nums">{m.futures}</td>
+              {metricRows.map((row) => (
+                <tr key={row.id} className="border-b border-white/5">
+                  <td className="py-2 font-medium text-white">{row.label}</td>
+                  <td className="py-2 text-white/60">{row.quote?.symbol ?? "—"}</td>
+                  <td className="py-2 text-white/80 tabular-nums">
+                    {row.quote
+                      ? row.quote.bid.toLocaleString("en-US", {
+                          maximumFractionDigits: row.quote.bid >= 100 ? 2 : 6
+                        })
+                      : "—"}
+                  </td>
+                  <td className="py-2 text-white/80 tabular-nums">
+                    {row.quote
+                      ? row.quote.ask.toLocaleString("en-US", {
+                          maximumFractionDigits: row.quote.ask >= 100 ? 2 : 6
+                        })
+                      : "—"}
+                  </td>
+                  <td className="py-2 text-white/80 tabular-nums">
+                    {row.spreadBps !== null ? row.spreadBps.toFixed(2) : "—"}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+        <p className="mt-3 text-[11px] text-white/40">
+          Rows populate as each exchange stream connects; futures metrics arrive with the
+          backend feed.
+        </p>
       </section>
     </div>
   );
